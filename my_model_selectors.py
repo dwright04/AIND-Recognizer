@@ -77,8 +77,26 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
-
+        best_bic = np.inf
+        best_model = None
+        for n_components in range(self.min_n_components, self.max_n_components+1):
+            try:
+                model = GaussianHMM(n_components=n_components, n_iter=1000).fit(self.X, self.lengths)
+            except ValueError:
+                continue
+            try:
+                L = model.score(self.X, self.lengths)
+            except ValueError:
+                continue
+            p = n_components
+            N = len(self.X)
+            bic = -2 * np.log(L) + p * np.log(N)
+            if bic < best_bic:
+                best_bic = bic
+                best_model = model
+        if best_model == None:
+            best_model = self.base_model(self.n_constant)
+        return best_model
 
 class SelectorDIC(ModelSelector):
     ''' select best model based on Discriminative Information Criterion
@@ -93,8 +111,33 @@ class SelectorDIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
-        raise NotImplementedError
-
+        best_dic = -np.inf
+        best_model = None
+        M = len(self.words.keys())
+        for n_components in range(self.min_n_components, self.max_n_components+1):
+            try:
+                model = GaussianHMM(n_components=n_components, n_iter=1000).fit(self.X, self.lengths)
+            except ValueError:
+                continue
+            try:
+                logPX = np.log(model.score(self.X, self.lengths))
+                logPAllNotX = 0
+                for word in self.words.keys():
+                    if word == self.this_word:
+                        continue
+                    X, lengths = self.hwords[word]
+                    logPAllNotX += np.log(model.score(X, lengths))
+            except ValueError:
+                continue
+            # case where alpha = 1
+            dic = logPX - (1. / (M-1) * logPAllNotX)
+            #print(dic)
+            if dic > best_dic:
+                best_dic = dic
+                best_model = model
+        if best_model == None:
+            best_model = self.base_model(self.n_constant)
+        return best_model
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
@@ -103,6 +146,28 @@ class SelectorCV(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        best_model = None
+        best_logL = -np.inf
+        for n_components in range(self.min_n_components, self.max_n_components+1):
+            if len(self.sequences) <= 1:
+                continue
+            for cv_train_idx, cv_test_idx in KFold(n_splits=min(3,len(self.sequences))).split(self.sequences):
+                logLs = []
+                Xtrain, lengthsTrain = combine_sequences(cv_train_idx, self.sequences)
+                Xtest, lengthsTest = combine_sequences(cv_test_idx, self.sequences)
+                try:
+                    model = GaussianHMM(n_components=n_components, n_iter=1000).fit(Xtrain, lengthsTrain)
+                except ValueError:
+                    continue
+                try:
+                    logLs.append(model.score(Xtest, lengthsTest))
+                except ValueError:
+                    pass
+            if np.mean(logLs) > best_logL:
+                best_logL = np.mean(logLs)
+                best_model = model
+        if best_model == None:
+            best_model = self.base_model(self.n_constant)
+        return best_model
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+
